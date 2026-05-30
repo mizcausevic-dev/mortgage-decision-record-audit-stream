@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mizcausevic-dev/mortgage-decision-record-audit-stream/blob/main/schema/mortgage-decision-event.schema.json",
+  "title": "Mortgage Decision Record Audit Event",
+  "description": "Hash-chained append-only ledger event describing which AI tool read which mortgage application field, when, under which RESPA / ECOA Reg B / Fair Housing / HMDA consent basis, under which buyer-published Decision Card, and under what records-of-disclosure obligation. Bridges MISMO (Mortgage Industry Standards Maintenance Organization) + Fannie Mae URLA (Uniform Residential Loan Application) semantics to the Kinetic Gain Protocol Suite audit-stream spine.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "timestamp",
+    "kind",
+    "source",
+    "subject_application_ref",
+    "resource",
+    "action",
+    "outcome",
+    "agent",
+    "consent_basis",
+    "decision_card_ref",
+    "prev_hash",
+    "hash"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "event_id":                  {"type": "string", "minLength": 1, "description": "UUID v7 or similar monotonic ID"},
+    "timestamp":                 {"type": "string", "format": "date-time"},
+    "kind": {
+      "type": "string",
+      "enum": [
+        "mortgage.application.read",
+        "mortgage.application.search",
+        "mortgage.application.write",
+        "mortgage.application.export",
+        "mortgage.application.recommendation-produced",
+        "mortgage.application.adverse-action-evaluated",
+        "mortgage.deletion-requested"
+      ]
+    },
+    "source":                    {"type": "string", "minLength": 1, "description": "The system that emitted the event (e.g. 'pacificcoast-los', 'vendorr-loandecision-5.2')"},
+    "subject_application_ref": {
+      "type": "object",
+      "required": ["scheme", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "scheme": {"type": "string", "enum": ["loan-application-id-tokenized", "mismo-loan-identifier-tokenized", "fannie-mae-loan-id-tokenized", "internal-tokenized"]},
+        "value":  {"type": "string", "minLength": 1, "description": "Tokenized loan-application identifier — RAW loan ID, applicant SSN, and applicant name MUST NOT appear"}
+      }
+    },
+    "resource": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type":           {"type": "string", "enum": ["urla-section-1-borrower", "urla-section-2-financial", "urla-section-3-real-estate", "urla-section-4-loan-property", "urla-section-5-declarations", "urla-section-6-acknowledgments", "urla-section-7-government-monitoring", "urla-section-9-loan-originator", "credit-bureau-record", "appraisal-report", "title-commitment", "loan-estimate", "closing-disclosure", "adverse-action-notice"]},
+        "mismo_xpath":    {"type": "string", "description": "MISMO XPath identifier for the specific field (e.g. '//Borrower/IncomeMonthlyAmount')"},
+        "id_tokenized":   {"type": "string", "minLength": 1, "description": "Tokenized resource ID"},
+        "fields_accessed":{"type": "array", "items": {"type": "string"}, "description": "Logical field names accessed (e.g. ['IncomeMonthlyAmount', 'EmploymentStartDate'])"}
+      }
+    },
+    "action": {
+      "type": "string",
+      "enum": ["C", "R", "U", "D", "E"],
+      "description": "Action codes: C = Create, R = Read, U = Update, D = Delete, E = Execute"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["0", "4", "8", "12"],
+      "description": "Outcome codes: 0 = success, 4 = minor failure, 8 = serious failure, 12 = major failure"
+    },
+    "agent": {
+      "type": "object",
+      "required": ["ai_tool_card_url", "ai_decision_card_url"],
+      "additionalProperties": false,
+      "properties": {
+        "ai_tool_card_url":     {"type": "string", "format": "uri"},
+        "ai_decision_card_url": {"type": "string", "format": "uri"},
+        "principal":            {"type": "string", "description": "OPTIONAL — actor on whose behalf the AI tool acted (loan officer, underwriter, processor)"}
+      }
+    },
+    "consent_basis": {
+      "type": "object",
+      "required": ["code"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "ecoa-written-application",
+            "respa-required-disclosure",
+            "fair-housing-required-collection",
+            "hmda-government-monitoring",
+            "glba-financial-privacy-rule-required",
+            "consumer-explicit-opt-in-granted",
+            "judicial-order-or-subpoena"
+          ]
+        },
+        "citation":         {"type": "string"},
+        "consent_record_uri":{"type": "string", "format": "uri"}
+      }
+    },
+    "decision_card_ref":       {"type": "string", "format": "uri"},
+    "records_of_disclosure_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "logged_in_ecoa_record":  {"type": "boolean", "description": "Whether this access was logged in the lender's 12 CFR §1002.12 25-month recordkeeping log"},
+        "logged_in_glba_log":     {"type": "boolean", "description": "Whether this access was logged in the lender's GLBA Safeguards vendor-monitoring log"},
+        "log_entry_uri":          {"type": "string", "format": "uri"}
+      }
+    },
+    "purpose_of_use":          {"type": "string", "description": "Free-text purpose statement (e.g. 'underwriting recommendation' OR 'pricing engine')"},
+    "redaction_applied":       {"type": "array", "items": {"type": "string"}, "description": "Which fields were tokenized / hashed / redacted per the Decision Card's vault contract before reaching the AI tool"},
+    "ai_recommendation": {
+      "type": "object",
+      "description": "OPTIONAL — when kind = 'mortgage.application.recommendation-produced', the recommendation issued (but never the final credit decision, which is human-issued)",
+      "additionalProperties": false,
+      "properties": {
+        "recommendation":            {"type": "string", "enum": ["approve", "counter-offer", "decline", "request-more-info"]},
+        "reason_codes":              {"type": "array", "items": {"type": "string"}, "description": "ECOA Reg B-aligned reason codes — these are recommendation reasons, NOT adverse-action notice reasons"},
+        "model_version":             {"type": "string"},
+        "model_confidence":          {"type": "number", "minimum": 0, "maximum": 1},
+        "human_underwriter_required": {"type": "boolean", "description": "MUST be true — no autonomous adverse-action issuance"}
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_ip_hashed":      {"type": "string"},
+        "tls_version":           {"type": "string"}
+      }
+    },
+    "signature": {
+      "type": "object",
+      "required": ["algorithm", "signer_key_uri", "signature_b64"],
+      "additionalProperties": false,
+      "properties": {
+        "algorithm":     {"type": "string", "const": "ed25519"},
+        "signer_key_uri":{"type": "string", "format": "uri"},
+        "signature_b64": {"type": "string"}
+      }
+    },
+    "prev_hash":               {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "hash":                    {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}
